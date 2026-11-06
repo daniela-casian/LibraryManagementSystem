@@ -1,0 +1,20 @@
+[
+  {
+    "id": 1,
+    "title": "Harry Potter",
+    "author": "J. K. Rowling",
+    "publicationYear": 1997
+  },
+  {
+    "id": 2,
+    "title": "The Hobbit",
+    "author": "J. R. R. Tolkien",
+    "publicationYear": 1937
+  },
+  {
+    "id": 3,
+    "title": "Pride and Prejudice",
+    "author": "Jane Austen",
+    "publicationYear": 1813
+  }
+]
