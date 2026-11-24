@@ -1,0 +1,102 @@
+
+<!DOCTYPE html>
+<html lang="ro">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>Admin Panel - Library Management System</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <nav>
+        <h1>Library Admin</h1>
+
+        <div class="nav-links">
+            <a href="index.html">Home</a>
+            <a href="index.html#books-section">Books</a>
+        </div>
+    </nav>
+
+    <main>
+
+        <section class="hero">
+            <h2>Admin Panel</h2>
+            <p>Manage books in the library.</p>
+        </section>
+
+        <section class="add-book-section">
+
+            <h2>Add a New Book</h2>
+
+            <form id="addBookForm">
+
+                <label for="bookTitle">Title</label>
+                <input
+                    type="text"
+                    id="bookTitle"
+                    required
+                >
+
+                <label for="bookAuthor">Author</label>
+                <input
+                    type="text"
+                    id="bookAuthor"
+                    required
+                >
+
+                <label for="bookDescription">Description</label>
+                <textarea
+                    id="bookDescription"
+                    rows="4"
+                    required
+                ></textarea>
+
+                <label for="bookCategory">Category ID</label>
+                <input
+                    type="number"
+                    id="bookCategory"
+                    min="1"
+                    required
+                >
+
+                <label for="bookYear">Publication Year</label>
+                <input
+                    type="number"
+                    id="bookYear"
+                    min="0"
+                    max="2100"
+                    required
+                >
+
+                <label for="bookIsbn">ISBN</label>
+                <input
+                    type="text"
+                    id="bookIsbn"
+                    required
+                >
+
+                <button type="submit">Add Book</button>
+
+            </form>
+
+            <p id="formMessage"></p>
+
+        </section>
+
+    </main>
+
+    <footer>
+        <p>Library Management System</p>
+    </footer>
+
+    <script src="admin.js"></script>
+
+</body>
+
+</html>

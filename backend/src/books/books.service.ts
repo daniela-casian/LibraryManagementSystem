@@ -3,112 +3,60 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { BookEntity } from './book.entity.js';
 import { CreateBookDto } from './dto/create-book.dto.js';
 import { UpdateBookDto } from './dto/update-book.dto.js';
 import { FindBooksDto } from './dto/find-books.dto.js';
 
-export type Book = {
-  id: number;
-  title: string;
-  author: string;
-  publicationYear: number;
-};
-
 @Injectable()
 export class BooksService {
-  private readonly dataDirectory = join(process.cwd(), 'data');
-  private readonly filePath = join(this.dataDirectory, 'books.json');
-
-  private async readBooks(): Promise<Book[]> {
-    await mkdir(this.dataDirectory, { recursive: true });
-
-    try {
-      const content = await readFile(this.filePath, 'utf8');
-      const books: unknown = JSON.parse(content);
-
-      if (!Array.isArray(books)) {
-        throw new BadRequestException(
-          'Fișierul books.json trebuie să conțină o listă de cărți.',
-        );
-      }
-
-      return books as Book[];
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        const initialBooks: Book[] = [
-          {
-            id: 1,
-            title: 'Harry Potter',
-            author: 'J. K. Rowling',
-            publicationYear: 1997,
-          },
-          {
-            id: 2,
-            title: 'The Hobbit',
-            author: 'J. R. R. Tolkien',
-            publicationYear: 1937,
-          },
-        ];
-
-        await this.writeBooks(initialBooks);
-        return initialBooks;
-      }
-
-      throw error;
-    }
-  }
-
-  private async writeBooks(books: Book[]): Promise<void> {
-    await mkdir(this.dataDirectory, { recursive: true });
-    await writeFile(
-      this.filePath,
-      JSON.stringify(books, null, 2),
-      'utf8',
-    );
-  }
+  constructor(
+    @InjectRepository(BookEntity)
+    private readonly booksRepository: Repository<BookEntity>,
+  ) {}
 
   async findAll(query: FindBooksDto) {
-    let filteredBooks = await this.readBooks();
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+
+    const qb = this.booksRepository.createQueryBuilder('book');
 
     if (query.search?.trim()) {
-      const term = query.search.trim().toLowerCase();
-
-      filteredBooks = filteredBooks.filter(
-        (book) =>
-          book.title.toLowerCase().includes(term) ||
-          book.author.toLowerCase().includes(term),
+      qb.andWhere(
+        '(LOWER(book.title) LIKE :search OR LOWER(book.author) LIKE :search)',
+        { search: `%${query.search.trim().toLowerCase()}%` },
       );
     }
 
     if (query.year !== undefined) {
-      filteredBooks = filteredBooks.filter(
-        (book) => book.publicationYear === query.year,
-      );
+      qb.andWhere('book.publicationYear = :year', {
+        year: query.year,
+      });
     }
 
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 10;
-    const total = filteredBooks.length;
-    const totalPages = Math.ceil(total / limit);
-    const startIndex = (page - 1) * limit;
+    qb.orderBy('book.id', 'ASC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    const [books, total] = await qb.getManyAndCount();
 
     return {
-      data: filteredBooks.slice(startIndex, startIndex + limit),
+      data: books,
       meta: {
         total,
         page,
         limit,
-        totalPages,
+        totalPages: Math.ceil(total / limit),
       },
     };
   }
 
-  async findOne(id: number): Promise<Book> {
-    const books = await this.readBooks();
-    const book = books.find((item) => item.id === id);
+  async findOne(id: number): Promise<BookEntity> {
+    const book = await this.booksRepository.findOneBy({ id });
 
     if (!book) {
       throw new NotFoundException(
@@ -119,62 +67,105 @@ export class BooksService {
     return book;
   }
 
-  async create(dto: CreateBookDto): Promise<Book> {
-    const books = await this.readBooks();
+  async create(dto: CreateBookDto): Promise<BookEntity> {
+    const categoryExists = await this.booksRepository.query(
+      'SELECT id FROM categories WHERE id = $1',
+      [dto.categoryId],
+    );
 
-    const newBook: Book = {
-      id: Math.max(0, ...books.map((book) => book.id)) + 1,
-      title: dto.title.trim(),
-      author: dto.author.trim(),
-      publicationYear: dto.publicationYear,
-    };
-
-    books.push(newBook);
-    await this.writeBooks(books);
-
-    return newBook;
-  }
-
-  async update(id: number, dto: UpdateBookDto): Promise<Book> {
-    const books = await this.readBooks();
-    const index = books.findIndex((book) => book.id === id);
-
-    if (index === -1) {
-      throw new NotFoundException(
-        `Cartea cu ID-ul ${id} nu a fost găsită.`,
+    if (categoryExists.length === 0) {
+      throw new BadRequestException(
+        `Categoria cu ID-ul ${dto.categoryId} nu există.`,
       );
     }
 
-    const currentBook = books[index];
+    const existingBook = await this.booksRepository.findOneBy({
+      isbn: dto.isbn.trim(),
+    });
 
-    const updatedBook: Book = {
-      ...currentBook,
-      ...(dto.title !== undefined && { title: dto.title.trim() }),
-      ...(dto.author !== undefined && { author: dto.author.trim() }),
-      ...(dto.publicationYear !== undefined && {
-        publicationYear: dto.publicationYear,
-      }),
-    };
+    if (existingBook) {
+      throw new ConflictException(
+        'Există deja o carte cu acest ISBN.',
+      );
+    }
 
-    books[index] = updatedBook;
-    await this.writeBooks(books);
+    const book = this.booksRepository.create({
+      title: dto.title.trim(),
+      author: dto.author.trim(),
+      description: dto.description.trim(),
+      categoryId: dto.categoryId,
+      publicationYear: dto.publicationYear,
+      isbn: dto.isbn.trim(),
+    });
 
-    return updatedBook;
+    return this.booksRepository.save(book);
+  }
+
+  async update(
+    id: number,
+    dto: UpdateBookDto,
+  ): Promise<BookEntity> {
+    const book = await this.findOne(id);
+
+    if (dto.categoryId !== undefined) {
+      const categoryExists = await this.booksRepository.query(
+        'SELECT id FROM categories WHERE id = $1',
+        [dto.categoryId],
+      );
+
+      if (categoryExists.length === 0) {
+        throw new BadRequestException(
+          `Categoria cu ID-ul ${dto.categoryId} nu există.`,
+        );
+      }
+    }
+
+    if (dto.isbn !== undefined) {
+      const existingBook = await this.booksRepository.findOneBy({
+        isbn: dto.isbn.trim(),
+      });
+
+      if (existingBook && existingBook.id !== id) {
+        throw new ConflictException(
+          'Există deja o carte cu acest ISBN.',
+        );
+      }
+    }
+
+    if (dto.title !== undefined) {
+      book.title = dto.title.trim();
+    }
+
+    if (dto.author !== undefined) {
+      book.author = dto.author.trim();
+    }
+
+    if (dto.description !== undefined) {
+      book.description = dto.description.trim();
+    }
+
+    if (dto.categoryId !== undefined) {
+      book.categoryId = dto.categoryId;
+    }
+
+    if (dto.publicationYear !== undefined) {
+      book.publicationYear = dto.publicationYear;
+    }
+
+    if (dto.isbn !== undefined) {
+      book.isbn = dto.isbn.trim();
+    }
+
+    return this.booksRepository.save(book);
   }
 
   async remove(id: number): Promise<{ message: string }> {
-    const books = await this.readBooks();
-    const index = books.findIndex((book) => book.id === id);
+    const book = await this.findOne(id);
 
-    if (index === -1) {
-      throw new NotFoundException(
-        `Cartea cu ID-ul ${id} nu a fost găsită.`,
-      );
-    }
+    await this.booksRepository.remove(book);
 
-    books.splice(index, 1);
-    await this.writeBooks(books);
-
-    return { message: `Cartea cu ID-ul ${id} a fost ștearsă.` };
+    return {
+      message: `Cartea cu ID-ul ${id} a fost ștearsă.`,
+    };
   }
 }
